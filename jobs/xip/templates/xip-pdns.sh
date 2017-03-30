@@ -71,6 +71,7 @@ NS_SUBDOMAIN_PATTERN="^ns-([0-9]+)\$"
 IP_SUBDOMAIN_PATTERN="(^|\.)(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\$"
 DASHED_IP_SUBDOMAIN_PATTERN="(^|-|\.)(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)-){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\$"
 BASE36_SUBDOMAIN_PATTERN="(^|\.)([a-z0-9]{1,7})\$"
+ELB_PATTERN="(^|\.)([a-zA-Z0-9\-]+\.(us-east-1|us-west-1|us-west-2|eu-west-1|eu-central-1|ap-northeast-1|ap-northeast-2|ap-southeast-1|ap-southeast-2|sa-east-1))\$"
 
 qtype_is() {
   [ "$QTYPE" = "$1" ] || [ "$QTYPE" = "ANY" ]
@@ -105,6 +106,10 @@ subdomain_is_base36() {
   [[ "$SUBDOMAIN" =~ $BASE36_SUBDOMAIN_PATTERN ]]
 }
 
+subdomain_is_elb() {
+  [[ "$SUBDOMAIN" =~ $ELB_PATTERN ]]
+}
+
 resolve_ns_subdomain() {
   local index="${SUBDOMAIN:3}"
   echo "${XIP_NS_ADDRESSES[$index-1]}"
@@ -124,6 +129,11 @@ resolve_base36_subdomain() {
   [[ "$SUBDOMAIN" =~ $BASE36_SUBDOMAIN_PATTERN ]] || true
   local ip=$(( 36#${BASH_REMATCH[2]} ))
   printf "%d.%d.%d.%d" $(( ip&0xFF )) $(( (ip>>8)&0xFF )) $(( (ip>>16)&0xFF )) $(( (ip>>24)&0xFF ))
+}
+
+resolve_elb_subdomain() {
+  [[ "$SUBDOMAIN" =~ $ELB_PATTERN ]] || true
+  echo "${BASH_REMATCH[2]}"
 }
 
 answer_soa_query() {
@@ -157,9 +167,13 @@ answer_mx_query() {
 answer_subdomain_a_query_for() {
   local type="$1"
   local address="$(resolve_${type}_subdomain)"
-  if [ -n "$address" ]; then
+
+  if [[ "$type" == "elb" ]]; then
+    send_answer "CNAME" "$address.elb.amazonaws.com"
+  elif [ -n "$address" ]; then
     send_answer "A" "$address"
   fi
+
 }
 
 
@@ -205,7 +219,11 @@ while read_query; do
 
       elif subdomain_is_base36; then
         answer_subdomain_a_query_for base36
+
+      elif subdomain_is_elb; then
+        answer_subdomain_a_query_for elb
       fi
+
     fi
   fi
 
